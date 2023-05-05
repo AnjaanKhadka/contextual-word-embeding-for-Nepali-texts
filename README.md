@@ -2,4 +2,4 @@
 
 Simple implementation of Word2Vec model from scratch
 
-Dataset Used sample text. It contains 16k nepali sentences, 326k words 
+Dataset Used sample text. It contains 16k nepali sentences, 326k words
