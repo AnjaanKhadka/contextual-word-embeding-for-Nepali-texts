@@ -1,39 +1,91 @@
 import numpy as np 
-import pandas as pd
-import random
-import sys
-import re
+import tqdm
+import pickle
+
+# from preprocess import get_values_for_parameter,prepare_dataset,filter_dataset,save_vocab_file
+
+
+
+
 
 
 class model:
-    def __init__(self,vocab_size : int, vector_size: int,encoded_data :int):
-        self.w1 = np.random.rand(vocab_size,vector_size)
-        self.w2 = np.random.rand(vector_size,vocab_size)
+    def __init__(self,dataset, vector_size: int, lr: float):
+        self.lr = lr
+        self.vector_size = vector_size
+        self.dataset = dataset
+        self.vocab_size = np.amax(dataset)+1
+        # print(f"minimum value in a is {np.amin(dataset)}")
+        self.w1 = np.random.uniform(low=-0.8,high=0.8,size = (self.vocab_size,self.vector_size))
+        self.w2 = np.random.uniform(low=-0.8,high=0.8,size =(self.vector_size,self.vocab_size))
         
         
     def softmax(self,x):
-        return np.exp(x) / np.sum(np.exp(x), axis=0)
+        # print(f"x = {x}")
+        # x = x.T
+        # print(np.exp(x) / np.sum(np.exp(x), axis=0))
+            # print(x)
+            # exit(0)
+        y = np.exp(x.T) / np.sum(np.exp(x), axis=1)
+        return y.T
     
-    def forward(self,encoded_data):
-        if encoded_data.shape[0] != self.w1.shape[0]:
-            raise ValueError("The input shape is not correct")
-        self.z1 = np.dot(encoded_data,self.w1)
+    def dataset_dot_w1(self, dataset):
+        # print(f"shape of w1 is {self.w1.shape}")
+        self.z1 = np.zeros((len(dataset),self.vector_size),dtype="int")
+        for j, (x,y) in enumerate(dataset):
+            for i in range(self.w1.shape[1]):
+                # try:
+                    self.z1[j][i] = self.w1[x][i] + self.w1[y][i]
+                # except:
+                #     print(f"i is {i} and j is {j} and x is {x} and y is {y} shape of w1 is {self.w1.shape} and shape of z1 is {self.z1.shape}")
+                #     exit(0)
+    def forward(self,dataset):        
+        # self.z1 = np.dot(self.dataset,self.w1)
+        self.dataset_dot_w1(dataset)
         self.z2 = np.dot(self.z1,self.w2)
         self.z3 = self.softmax(self.z2)
         return self.z3
     
-    def backward(self,encoded_data,outputs,lr):
-        self.dz2 = outputs - encoded_data
+    def get_dataset_arr(self,data):
+        temp = np.zeros((len(data),self.vocab_size),dtype="bool")
+        for ind,(x,y) in enumerate(data):
+            temp[ind][x] = 1
+            temp[ind][y] = 1
+        return temp
+    
+    def backward(self,dataset, outputs):
+        dataset = self.get_dataset_arr(dataset)
+        self.dz2 = outputs - dataset
         self.dw2 = np.dot(self.z1.T,self.dz2)
         self.dz1 = np.dot(self.dz2,self.w2.T)
-        self.dw1 = np.dot(encoded_data.T,self.dz1)
-        self.w1 -= lr * self.dw1
-        self.w2 -= lr * self.dw2 
-        
-    def train_for_a_epoch(self,encoded_data,lr):
-        outputs = self.forward(encoded_data)
-        self.backward(encoded_data,outputs,lr)
+        self.dw1 = np.dot(dataset.T,self.dz1)
+        self.w1 -= self.lr * self.dw1
+        self.w2 -= self.lr * self.dw2 
      
+    def divide_list_into_n_chunks(self,n):
+        i = 0
+        for i in range(0,len(self.dataset) - 2 * len(self.dataset)//n,len(self.dataset)//n):
+            yield self.dataset[i:i+len(self.dataset)//n]
+        yield self.dataset[i+len(self.dataset)//n:]
+     
+        
+    def train_for_n_epoch(self,number_of_epochs, number_of_batch = 2):
+        # print(len(self.dataset))
+        # exit(0)
+        for i in tqdm.tqdm(range(number_of_epochs)):
+            for _,data in tqdm.tqdm(enumerate(self.divide_list_into_n_chunks(n = number_of_batch))):
+                outputs = self.forward(data)
+                print(outputs)
+                self.backward(dataset= data, outputs = outputs)
+            with open("model.pkl","wb") as f:
+                pickle.dump(self.w1,f)
+                pickle.dump(self.w2,f)
+
+    # def encode_data(self,data,vocab_size):
+    #     encoded_data = np.zeros((vocab_size,1))
+    #     encoded_data[data] = 1
+    #     return encoded_data
+    
 
 
 # def encode_data(data,vocab_size):
@@ -42,97 +94,34 @@ class model:
 #     return encoded_data
 
 
+def encode_complete_dataset(data,vocab_size):
+    encoded_data = np.zeros((len(data),vocab_size),dtype="bool")
+    for i in range(len(data)):
+        # print(data[i][0])
+        encoded_data[i,data[i]] = 1
+    return encoded_data
 
 
-def separate_into_sentences(entire_text, sentence_separator = "।"):
-    sentences = entire_text.split(sentence_separator)
-    return sentences
-
-def separate_into_words(sentences_arr, word_separator = " "):
-    words = []
-    for sentence in sentences_arr:
-        words.append(sentence.split(word_separator))
-    return words
-
-def get_word_vocab(words_arr):
-    vocab = []
-    for words in words_arr:
-        for word in words:
-            if word not in vocab:
-                vocab.append(word)
-    return vocab
 
 
-#######################################
-
-def remove_all_characters_except_vocab(text,character_vocab):
-    new_text = ""
-    for char in text:
-        if char in character_vocab:
-            new_text += char
-    return new_text        
-
-
-def filter_text(text):
-    text = re.sub("\(.*?\)","",text)
-    return text
-
-def remove_consecutive_spaces(text):
-    return re.sub(" +"," ",text)
-
-#######################################
-
-
-def prepare_dataset(filepath, character_vocab = None):
-    ''' 
-        Character vocab is a list of characters that are allowed in the dataset.
-        None means no data is filtered.
-    '''
-    text = filter_text(open(filepath,encoding="utf-8").read())
-    
-    if character_vocab:
-        text = remove_all_characters_except_vocab(text,character_vocab)
-    text = remove_consecutive_spaces(text)
-    sentences = separate_into_sentences(text)
-    words = separate_into_words(sentences)
-    
-    return(words)
-    
-def filter_dataset(entire_text):
-    new_text = []
-    for sentence in entire_text:
-        new_sent = []
-        for word in sentence:
-            if word != "":
-                new_sent.append(word)
-        if len(new_sent) > 0:
-            new_text.append(new_sent)
-    return new_text
-            
-    
-
-def _get_values_for_parameter(parameter_name,arguments):
-    if parameter_name not in arguments:
-        raise ValueError("Parameter {} not provided".format(parameter_name))
-    index = arguments.index(parameter_name)
-    if index == len(arguments) - 1:
-        raise ValueError("No value provided for parameter {}".format(parameter_name))
-    if arguments[index + 1].startswith("-"):
-        raise ValueError("No value provided for parameter {}".format(parameter_name))
-    return arguments[index + 1]
+def get_words_vocab(word_vocab_file):
+    return open(word_vocab_file,"r",encoding="utf-8").read().split("\n")
 
 
 if __name__ == "__main__":
-    arguments = sys.argv[1:]
     
-    # inp = _get_values_for_parameter("-i",arguments)
-    # out = _get_values_for_parameter("-o",arguments)
-    # print(inp,out)
+    config = {
+        "learning_rate": 0.01,
+        "vector_size": 10,
+        "number_of_batch":1000,
+        "epochs": 10,
+    }
+
+    dataset = pickle.load(open("dataset.pkl","rb"))
     
-    inp = "data.txt"
+    # dataset = [[1,2],[1,3],[2,3],[4,1],[4,2],[5,4],[5,3],[5,1]]
     
-    entire_text = prepare_dataset(inp)
-    entire_text = filter_dataset(entire_text)
-    print(len(entire_text))
+    print(len(dataset))
     
-    
+    model = model(dataset = dataset, lr=config['learning_rate'], vector_size=config['vector_size'])
+    model.train_for_n_epoch(number_of_epochs=config['epochs'],number_of_batch=config['number_of_batch'])
